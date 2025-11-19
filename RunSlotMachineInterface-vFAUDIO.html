@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Slot Machine Prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; background:#000; display:flex; min-height:100vh; }
+    .wrap { margin:auto; width:min(1100px, 96vw); display:grid; grid-template-columns: 1fr 1fr; gap:20px; align-items:start; }
+    .pane { background:#000; }
+    .imgFrame { position:relative; overflow:visible; }
+    .imgFrame img { display:block; width:100%; height:auto; }
+    .svgButton { position:absolute; cursor:pointer; transition:all .2s ease; }
+    .svgButton:hover { opacity:0.8; }
+    .svgButton:active { opacity:0.6; transform:scale(0.98); }
+    .valueOverlay { position:absolute; background:#000; color:#fff; font-weight:700; font-size:20px; padding:8px 16px; border-radius:8px; text-align:center; border:2px solid #FFD100; }
+    .spinning .gameplayImg { filter:saturate(1.3) contrast(1.1); animation: wob 0.9s ease-in-out infinite alternate; }
+    @keyframes wob { from { transform:scale(1.0) } to { transform:scale(1.01) } }
+    
+    /* Fix for position jumping - maintain consistent container size */
+    .gameplayVideo, .gameplayImg { 
+      display:block; 
+      width:100%; 
+      height:auto;
+      /* Ensure consistent aspect ratio rendering */
+      object-fit: contain;
+    }
+    
+    /* Keep gameplay frame at consistent dimensions */
+    #gameplayFrame {
+      min-height: 0;
+      overflow: visible;
+    }
+
+    /* Cash-out full-screen panel inside gameplayFrame */
+    .cashoutScreen {
+      position: center;
+      inset: 0;                 /* top:0; right:0; bottom:0; left:0; */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.85);
+      z-index: 2000;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+
+    .cashoutCard {
+      width: min(560px, 90%);
+      text-align: center;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border-radius: 12px;
+      padding: 28px;
+      color: #fff;
+      border: 2px solid rgba(255,209,0,0.9);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+
+    .cashoutCard h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
+      letter-spacing: -0.5px;
+    }
+
+    .cashoutCard .stat {
+      font-weight:700;
+      font-size:24px;
+      margin: 8px 0;
+    }
+
+    .cashoutCard .cta {
+      margin-top: 18px;
+      display:inline-block;
+      padding:10px 18px;
+      border-radius:8px;
+      background:#FFD100;
+      color:#000;
+      font-weight:700;
+      cursor:pointer;
+      text-decoration:none;
+    }
+
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="pane" id="interfacePane">
+      <div class="imgFrame">
+        <img id="interfaceImg" src="Interaction_Screen_10.svg" alt="Interface" />
+        <div class="svgButton betBtn" data-value="10" style="top:44.4%; left:28%; width:12.6%; height:22.7%;"></div>
+        <div class="svgButton betBtn" data-value="20" style="top:44.4%; left:41.6%; width:12.6%; height:22.7%;"></div>
+        <div class="svgButton betBtn" data-value="30" style="top:44.4%; left:55.2%; width:12.6%; height:22.7%;"></div>
+        <div class="svgButton betBtn" data-value="40" style="top:44.4%; left:68.8%; width:12.6%; height:22.7%;"></div>
+        <div class="svgButton betBtn" data-value="50" style="top:44.4%; left:82.4%; width:12.6%; height:22.7%;"></div>
+        <div class="svgButton" id="cashOutBtn" style="top:18.5%; left:5%; width:18.6%; height:33.5%;"></div>
+        <div class="valueOverlay" id="balanceOverlay" style="top:6%; left:28%; min-width:80px; display:none;">$<span id="balanceLabel3">0</span></div>
+        <div class="valueOverlay" id="betOverlay" style="top:6%; right:28%; min-width:80px; display:none;">$<span id="betLabel3">0</span></div>
+      </div>
+      <div style="display:flex; justify-content:center; margin-top:16px;">
+        <img src="Spin_Button.svg" id="spinBtnOverlay" style="width:45%; max-width:250px; cursor:pointer;" alt="Spin Button" />
+      </div>
+    </section>
+    <section class="pane" id="gameplayPane">
+      <div class="imgFrame" id="gameplayFrame">
+        <img class="gameplayImg" id="gameplayImg" src="Spin_Start_Screen.png" alt="Gameplay" />
+        <div class="valueOverlay" id="balanceOverlayGameplay" style="top:220px; left:145px; min-width:70px; font-size:26px; padding:5px 10px;">$<span id="balanceLabel">0</span></div>
+        <div class="valueOverlay" id="betOverlayGameplay" style="top:220px; left:320px; min-width:70px; font-size:26px; padding:5px 10px;">$<span id="betLabel">0</span></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const DEFAULT_BALANCE = 100;
+    let state = { balance: DEFAULT_BALANCE, bet: 0, locked: false, halted: false, lastOutcome: null, spinCount: 0 };
+
+    const balanceLabel = document.getElementById("balanceLabel");
+    const balanceLabel3 = document.getElementById("balanceLabel3");
+    const betLabel = document.getElementById("betLabel");
+    const betLabel3 = document.getElementById("betLabel3");
+    const spinBtnOverlay = document.getElementById("spinBtnOverlay");
+    const betButtons = Array.from(document.querySelectorAll(".betBtn"));
+    const gameplayPane = document.getElementById("gameplayPane");
+    const gameplayFrame = document.getElementById("gameplayFrame");
+    const interfaceImg = document.getElementById("interfaceImg");
+
+    const OUTCOMES = {
+      WIN1: { 
+        sequence: [{ type: 'video', src: 'Win_Instance_1_AnimationVF.mp4' }, { type: 'image', src: 'Win_Instance_1_End_Frame.png' }],
+        postVideoDelay: 100,
+        multiplier: 1,
+        label: 'WIN',
+        audio: 'Audio_Clip_Win.mp3'
+      },
+      WIN2: { 
+        sequence: [{ type: 'video', src: 'Win_Instance_2_AnimationVF.mp4' }, { type: 'image', src: 'Win_Instance_2_End_Frame.png' }],
+        postVideoDelay: 100,
+        multiplier: 2,
+        label: 'BIG WIN',
+        audio: 'Audio_Clip_Win.mp3'
+      },
+      LOSS: { 
+        sequence: [{ type: 'video', src: 'Loss_Instance_AnimationVF.mp4' }, { type: 'image', src: 'Loss_Instance_End_Frame.png' }],
+        postVideoDelay: 100,
+        multiplier: -1,
+        label: 'LOSS',
+        audio: 'Audio_Clip_Loss.mp3'
+      },
+      BTL: { 
+        sequence: [{ type: 'video', src: 'Bonus_Instance_AnimationVF.mp4' }, { type: 'image', src: 'Bonus_Instance_End_Frame.png' }],
+        postVideoDelay: 300,
+        multiplier: -1,
+        label: 'BONUS',
+        audio: 'Audio_Clip_Loss.mp3'
+      }
+    };
+
+    // Image preload cache
+    const imageCache = new Map();
+
+    function preloadImage(src) {
+      if (imageCache.has(src)) {
+        return imageCache.get(src);
+      }
+      
+      const promise = new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+      
+      imageCache.set(src, promise);
+      return promise;
+    }
+
+    function playAudio(src) {
+      try {
+        const audio = new Audio(src);
+        audio.volume = 1.0;
+        audio.play().catch(err => console.log('Audio play failed:', err));
+      } catch (err) {
+        console.log('Audio error:', err);
+      }
+    }
+
+    function init() { 
+      updateUI(); 
+      wireEvents(); 
+      selectBetButton(betButtons[0]);
+      
+      // Preload all end frame images
+      Object.values(OUTCOMES).forEach(outcome => {
+        outcome.sequence.forEach(item => {
+          if (item.type === 'image') {
+            preloadImage(item.src);
+          }
+        });
+      });
+    }
+
+    function wireEvents() {
+      betButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (state.locked || state.halted) return;
+          selectBetButton(btn);
+          const v = Number(btn.dataset.value);
+          interfaceImg.src = `Interaction_Screen_${v}.svg`;
+        });
+      });
+
+      spinBtnOverlay.addEventListener("click", () => {
+        if (state.locked || state.halted) return;
+        if (state.bet <= 0) return;
+        if (state.balance < state.bet) return;
+
+        //remove win/loss overlay when starting a new spin
+        const existingOverlay = document.getElementById('winLossOverlay');
+        if(existingOverlay) existingOverlay.remove();
+
+        // Play spin audio
+        playAudio('Audio_Clip_Spin.mp3');
+
+        spin();
+      });
+
+      const cashOutBtn = document.getElementById("cashOutBtn");
+      console.log('Cash out button found?', cashOutBtn);
+      console.log('Cash out button element:', cashOutBtn);
+      
+      cashOutBtn.addEventListener("click", () => {
+        console.log('Cash out button CLICKED!');
+        console.log('state.locked:', state.locked);
+        console.log('state.halted:', state.halted);
+        
+        // Remove the lock check temporarily for testing
+        // if (state.locked) return;
+        
+        cashOut();
+      });
+    }
+
+    function selectBetButton(btn) {
+      betButtons.forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.bet = Number(btn.dataset.value);
+      updateUI();
+    }
+
+    function lockUI() {
+      state.locked = true;
+      setControlsDisabled(true);
+      gameplayPane.classList.add("spinning");
+      replaceGameplayWithImage('Spin_Start_Screen.png');
+    }
+
+    function unlockUI() {
+      state.locked = false;
+      setControlsDisabled(false);
+      gameplayPane.classList.remove("spinning");
+    }
+
+    function setControlsDisabled(disabled) {
+      betButtons.forEach(b => { b.disabled = disabled; b.style.pointerEvents = disabled ? 'none' : 'auto'; });
+      spinBtnOverlay.style.pointerEvents = disabled ? 'none' : 'auto';
+    }
+
+    function updateUI() {
+      balanceLabel.textContent = state.balance.toString();
+      balanceLabel3.textContent = state.balance.toString();
+      betLabel.textContent = state.bet.toString();
+      betLabel3.textContent = state.bet.toString();
+      betButtons.forEach(btn => {
+        const betValue = Number(btn.dataset.value);
+        if (betValue > state.balance) { btn.disabled = true; btn.style.opacity = '0.3'; btn.style.pointerEvents = 'none'; }
+        else { btn.disabled = false; btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; }
+      });
+      if (state.balance < state.bet) { spinBtnOverlay.style.opacity = '0.3'; spinBtnOverlay.style.pointerEvents = 'none'; }
+      else { spinBtnOverlay.style.opacity = '1'; spinBtnOverlay.style.pointerEvents = 'auto'; }
+    }
+
+    async function spin() {
+      lockUI();
+      state.spinCount++;
+      await wait(900);
+      const x = Math.random();
+      let outcomeKey;
+      let amountChange = 0;
+      if (x < 0.30) { outcomeKey = "WIN1"; amountChange = state.bet; state.balance += state.bet; }
+      else if (x < 0.40) { outcomeKey = "WIN2"; amountChange = 2 * state.bet; state.balance += 2 * state.bet; }
+      else if (x < 0.75) { outcomeKey = "LOSS"; amountChange = -state.bet; state.balance -= state.bet; }
+      else { outcomeKey = "BTL"; amountChange = -state.bet; state.balance -= state.bet; }
+      state.balance = Math.max(0, Math.round(state.balance));
+      const oc = OUTCOMES[outcomeKey];
+      
+      // Add audio filename to the final image in sequence
+      const sequence = oc.sequence.map((item, idx) => {
+        if (item.type === 'image' && idx === oc.sequence.length - 1 && oc.audio) {
+          return { ...item, audio: oc.audio };
+        }
+        return item;
+      });
+      
+      try { await playOutcomeSequence(sequence, oc.postVideoDelay); } catch (e) {
+        const last = sequence[sequence.length - 1];
+        if (last.type === 'image') replaceGameplayWithImage(last.src);
+      }
+      state.lastOutcome = outcomeKey;
+      updateUI();
+      showWinLossOverlay(amountChange, oc.label);
+      unlockUI();
+    }
+
+    async function replaceGameplayWithImage(src) {
+      // Ensure image is loaded before switching
+      try {
+        await preloadImage(src);
+      } catch (e) {
+        console.error('Failed to load image:', src);
+      }
+      
+      const existingVideo = gameplayFrame.querySelector('video');
+      let img = document.getElementById('gameplayImg');
+      
+      if (!img) {
+        img = document.createElement('img');
+        img.id = 'gameplayImg';
+        img.className = 'gameplayImg';
+      }
+      
+      // Set image src
+      img.src = src;
+      
+      // If video exists, wait for it to complete its final frames before transitioning
+      if (existingVideo) {
+        // Use requestAnimationFrame to ensure video's final frame is fully painted
+        await new Promise(resolve => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(resolve);
+            });
+          });
+        });
+        
+        // Insert image behind video first
+        if (!gameplayFrame.contains(img)) {
+          gameplayFrame.insertBefore(img, gameplayFrame.firstChild);
+        }
+        img.style.display = 'block';
+        
+        // Wait for image to fully render
+        await new Promise(resolve => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(resolve);
+          });
+        });
+        
+        // Now remove the video
+        existingVideo.remove();
+      } else {
+        // No video, just show the image
+        if (!gameplayFrame.contains(img)) {
+          gameplayFrame.insertBefore(img, gameplayFrame.firstChild);
+        }
+        img.style.display = 'block';
+      }
+    }
+
+    function playVideoInGameplay(src, nextImageSrc) {
+      return new Promise((resolve, reject) => {
+        const existingImg = document.getElementById('gameplayImg');
+        const oldVideo = gameplayFrame.querySelector('video');
+        if (oldVideo) oldVideo.remove();
+        
+        const video = document.createElement('video');
+        video.className = 'gameplayVideo';
+        video.autoplay = false;
+        video.playsInline = true;
+        video.muted = true;
+        video.preload = 'auto';
+        video.poster = 'Spin_Start_Screen.png';
+        video.src = src;
+        video.style.display = 'none';
+        
+        // Preload the next image while video is playing
+        if (nextImageSrc) {
+          preloadImage(nextImageSrc).catch(err => {
+            console.error('Failed to preload next image:', err);
+          });
+        }
+        
+        let resolved = false;
+        let videoElement = null;
+        
+        function cleanup() {
+          video.removeEventListener('canplay', onCanPlay);
+          video.removeEventListener('playing', onPlaying);
+          video.removeEventListener('ended', onEnded);
+          video.removeEventListener('error', onError);
+        }
+        
+        function onCanPlay() {
+          if (!gameplayFrame.contains(video)) {
+            gameplayFrame.insertBefore(video, gameplayFrame.firstChild);
+          }
+          const p = video.play();
+          if (p && p.then) p.catch(() => {});
+        }
+        
+        function onPlaying() {
+          // Hide existing image but don't remove it yet to maintain container dimensions
+          if (existingImg) {
+            existingImg.style.display = 'none';
+          }
+          video.style.display = '';
+          videoElement = video;
+        }
+        
+        function onEnded() { 
+          if (!resolved) { 
+            resolved = true; 
+            cleanup();
+            // Don't remove the video here - let replaceGameplayWithImage handle it
+            // This ensures the video's last frame stays visible
+            resolve(); 
+          } 
+        }
+        
+        function onError(e) { 
+          if (!resolved) { 
+            resolved = true; 
+            cleanup(); 
+            reject(e || new Error('Video playback error')); 
+          } 
+        }
+        
+        video.addEventListener('canplay', onCanPlay);
+        video.addEventListener('playing', onPlaying);
+        video.addEventListener('ended', onEnded);
+        video.addEventListener('error', onError);
+        
+        gameplayFrame.insertBefore(video, gameplayFrame.firstChild);
+        
+        const fallback = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            if (existingImg) existingImg.style.display = 'none';
+            video.style.display = '';
+            resolve();
+          }
+        }, 12000);
+        
+        video.addEventListener('ended', () => clearTimeout(fallback));
+      });
+    }
+
+    async function playOutcomeSequence(sequence, postVideoDelay = 100) {
+      for (let i = 0; i < sequence.length; i++) {
+        const item = sequence[i];
+        
+        if (item.type === 'video') {
+          // Find the next image in sequence to preload
+          const nextImageSrc = sequence[i + 1]?.type === 'image' ? sequence[i + 1].src : null;
+          await playVideoInGameplay(item.src, nextImageSrc);
+          
+          // Add outcome-specific delay after video ends to ensure final frames are painted
+          if (nextImageSrc && postVideoDelay > 0) {
+            await wait(postVideoDelay);
+          }
+        } 
+        else if (item.type === 'image') { 
+          await replaceGameplayWithImage(item.src);
+          // This is the end frame - play outcome audio if it exists
+          if (item.audio) {
+            playAudio(item.audio);
+          }
+          await wait(1200); 
+        }
+      }
+    }
+
+    function wait(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+    function showWinLossOverlay(amount, label) {
+      // Remove any existing win/loss overlay
+      const existingOverlay = document.getElementById('winLossOverlay');
+      if (existingOverlay) existingOverlay.remove();
+
+      // Create new overlay
+      const overlay = document.createElement('div');
+      overlay.id = 'winLossOverlay';
+      overlay.className = 'valueOverlay';
+      
+      // Position in center of gameplay frame
+      overlay.style.top = '52.7%';
+      overlay.style.left = '51%';
+      overlay.style.transform = 'translate(-50%, -50%)';
+      overlay.style.fontSize = '32px';
+      overlay.style.padding = '12px 24px';
+      overlay.style.minWidth = '150px';
+      overlay.style.zIndex = '100';
+      
+      // Format the amount display
+      let amountText = '';
+      if (amount > 0) {
+        amountText = `+${amount}`;
+        overlay.style.borderColor = '#00FF00';
+        overlay.style.color = '#00FF00';
+      } else if (amount < 0) {
+        amountText = `-${Math.abs(amount)}`;
+        overlay.style.borderColor = '#FF0000';
+        overlay.style.color = '#FF0000';
+      } else {
+        amountText = '$0';
+      }
+      
+      overlay.textContent = amountText;
+      gameplayFrame.appendChild(overlay);
+
+    }
+
+    function cashOut() {
+      console.log('=== CASH OUT STARTED ===');
+      
+      // 1) Lock UI FIRST to prevent any new operations
+      state.halted = true;
+      state.locked = true;
+      setControlsDisabled(true);
+
+      // 2) Wait a tiny bit for any in-flight operations to complete
+      setTimeout(() => {
+        console.log('Starting cleanup after delay...');
+        
+        // 3) Clear the entire innerHTML - nuclear option
+        gameplayFrame.innerHTML = '';
+        
+        console.log('gameplayFrame cleared, children:', gameplayFrame.children.length);
+
+        // 4) Build a simple HTML/CSS cash-out screen
+        const wrapper = document.createElement('div');
+        wrapper.className = 'cashoutScreen';
+
+        const card = document.createElement('div');
+        card.className = 'cashoutCard';
+        card.innerHTML = `
+          <h1>Thanks for playing!</h1>
+          <div class="stat">Final Balance: <strong>$${state.balance}</strong></div>
+          <div class="stat">Total Spins: <strong>${state.spinCount}</strong></div>
+          <div style="margin-top:6px; color:rgba(255,255,255,0.75); font-size:13px;">
+            We hope you enjoyed the demo.
+          </div>
+          <div style="margin-top:16px;">
+            <a class="cta" id="cashoutCloseBtn">Close</a>
+          </div>
+        `;
+
+        wrapper.appendChild(card);
+        gameplayFrame.appendChild(wrapper);
+        
+        console.log('Cash-out screen added');
+
+        // 5) Hook close button
+        document.getElementById('cashoutCloseBtn').addEventListener('click', () => {
+          wrapper.remove();
+        });
+
+        console.log('=== CASH OUT COMPLETED ===');
+      }, 100); // Small delay to let any async operations finish
+    }
+
+    init();
+  </script>
+</body>
+</html>
