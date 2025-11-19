@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -130,25 +129,29 @@
         sequence: [{ type: 'video', src: 'Win_Instance_1_AnimationVF.mp4' }, { type: 'image', src: 'Win_Instance_1_End_Frame.png' }],
         postVideoDelay: 100,
         multiplier: 1,
-        label: 'WIN'
+        label: 'WIN',
+        audio: 'Audio_Clip_Win.mp3'
       },
       WIN2: { 
         sequence: [{ type: 'video', src: 'Win_Instance_2_AnimationVF.mp4' }, { type: 'image', src: 'Win_Instance_2_End_Frame.png' }],
         postVideoDelay: 100,
         multiplier: 2,
-        label: 'BIG WIN'
+        label: 'BIG WIN',
+        audio: 'Audio_Clip_Win.mp3'
       },
       LOSS: { 
         sequence: [{ type: 'video', src: 'Loss_Instance_AnimationVF.mp4' }, { type: 'image', src: 'Loss_Instance_End_Frame.png' }],
         postVideoDelay: 100,
         multiplier: -1,
-        label: 'LOSS'
+        label: 'LOSS',
+        audio: 'Audio_Clip_Loss.mp3'
       },
       BTL: { 
         sequence: [{ type: 'video', src: 'Bonus_Instance_AnimationVF.mp4' }, { type: 'image', src: 'Bonus_Instance_End_Frame.png' }],
         postVideoDelay: 300,
         multiplier: -1,
-        label: 'BONUS'
+        label: 'BONUS',
+        audio: 'Audio_Clip_Loss.mp3'
       }
     };
 
@@ -169,6 +172,16 @@
       
       imageCache.set(src, promise);
       return promise;
+    }
+
+    function playAudio(src) {
+      try {
+        const audio = new Audio(src);
+        audio.volume = 1.0;
+        audio.play().catch(err => console.log('Audio play failed:', err));
+      } catch (err) {
+        console.log('Audio error:', err);
+      }
     }
 
     function init() { 
@@ -205,12 +218,15 @@
         const existingOverlay = document.getElementById('winLossOverlay');
         if(existingOverlay) existingOverlay.remove();
 
+        // Play spin audio
+        playAudio('Audio_Clip_Spin.mp3');
+
         spin();
       });
 
       const cashOutBtn = document.getElementById("cashOutBtn");
-      console.log('Cash out button found?', cashOutBtn); // ADD THIS
-      console.log('Cash out button element:', cashOutBtn); // ADD THIS
+      console.log('Cash out button found?', cashOutBtn);
+      console.log('Cash out button element:', cashOutBtn);
       
       cashOutBtn.addEventListener("click", () => {
         console.log('Cash out button CLICKED!');
@@ -276,8 +292,17 @@
       else { outcomeKey = "BTL"; amountChange = -state.bet; state.balance -= state.bet; }
       state.balance = Math.max(0, Math.round(state.balance));
       const oc = OUTCOMES[outcomeKey];
-      try { await playOutcomeSequence(oc.sequence, oc.postVideoDelay); } catch (e) {
-        const last = oc.sequence[oc.sequence.length - 1];
+      
+      // Add audio filename to the final image in sequence
+      const sequence = oc.sequence.map((item, idx) => {
+        if (item.type === 'image' && idx === oc.sequence.length - 1 && oc.audio) {
+          return { ...item, audio: oc.audio };
+        }
+        return item;
+      });
+      
+      try { await playOutcomeSequence(sequence, oc.postVideoDelay); } catch (e) {
+        const last = sequence[sequence.length - 1];
         if (last.type === 'image') replaceGameplayWithImage(last.src);
       }
       state.lastOutcome = outcomeKey;
@@ -445,7 +470,11 @@
           }
         } 
         else if (item.type === 'image') { 
-          await replaceGameplayWithImage(item.src); 
+          await replaceGameplayWithImage(item.src);
+          // This is the end frame - play outcome audio if it exists
+          if (item.audio) {
+            playAudio(item.audio);
+          }
           await wait(1200); 
         }
       }
